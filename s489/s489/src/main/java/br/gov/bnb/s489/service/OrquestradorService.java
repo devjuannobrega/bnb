@@ -1,7 +1,9 @@
 package br.gov.bnb.s489.service;
 
+import br.gov.bnb.s489.commons.config.Bb.BbPagamentoService;
 import br.gov.bnb.s489.model.dto.ReceiverDTO;
 import br.gov.bnb.s489.model.dto.ResponseDTO;
+import br.gov.bnb.s489.model.xml.XmlMapper;
 import br.gov.bnb.s489.model.xml.XmlMapperReceiver;
 import br.gov.bnb.s489.utils.exception.XmlValidationException;
 import jakarta.xml.bind.JAXBContext;
@@ -17,6 +19,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
 import java.io.StringReader;
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -28,7 +31,8 @@ public class OrquestradorService {
 
     private final WebClient webClient;
     private final ValidarXmlService validarXmlService; // valida ENTRADA
-    private final Validator validator;                 // valida SAÍDA (opcional, se anotar XmlMapperReceiver)
+    private final Validator validator;                 // valida SAÍDA (se XmlMapperReceiver tiver anotações)
+    private final BbPagamentoService bbPagamentoService;
 
     @Value("${bnb.wrapper.url}")
     private String wrapperUrl;
@@ -68,19 +72,52 @@ public class OrquestradorService {
             throw new XmlValidationException("XML de SAÍDA inválido: " + erros);
         }
 
-        // 5) Verificar RAJADA
+        // 5) Verificar RAJADA e acionar BB quando presente porém vazia
         String rajada = null;
         if (xmlReceiver.getObjectData() != null && xmlReceiver.getObjectData().getRecolhimento() != null) {
             rajada = xmlReceiver.getObjectData().getRecolhimento().getRajada();
         }
+
         if (rajada == null) {
             log.info("Campo 'Rajada' AUSENTE no XML de saída.");
         } else if (rajada.trim().isEmpty()) {
-            log.info("Campo 'Rajada' presente porém VAZIO no XML de saída.");
+            log.info("Campo 'Rajada' presente porém VAZIO no XML de saída. Acionando pagamento BB...");
+
+            // Extrai dados para pagamento
+            var rec = xmlReceiver.getObjectData().getRecolhimento();
+
+            // valor (BigDecimal, aceita vírgula)
+            BigDecimal valorPagamento = parseValorMonetario(rec.getValor());
+            if (valorPagamento == null) {
+                throw new XmlValidationException("Valor de pagamento inválido ou ausente no XML de saída.");
+            }
+
+            String codigoBarrassSDV = rec.getCodigoBarra(); // sem DV (saída)
+            if (isBlank(codigoBarrassSDV)) {
+                throw new XmlValidationException("Código de barras (sem DV) ausente no XML de saída.");
+            }
+
+            // Linha digitável (com DV) vem do XML de ENTRADA
+            XmlMapper xmlEntrada = unmarshalXmlEntrada(request.getXml());
+            if (xmlEntrada.getObjectData() == null || isBlank(xmlEntrada.getObjectData().getLinhaDigitavel())) {
+                throw new XmlValidationException("Linha digitável (com DV) ausente no XML de entrada.");
+            }
+            String codigoBarrasCDV = xmlEntrada.getObjectData().getLinhaDigitavel();
+
+            // Chama Banco do Brasil
+            String respBb = bbPagamentoService.enviarPagamento(
+                    valorPagamento.doubleValue(),
+                    codigoBarrasCDV,
+                    codigoBarrassSDV
+            );
+
+            log.info("Retorno BB: {}", respBb);
+
         } else {
             log.warn("⚠ Campo 'Rajada' encontrado no XML de saída: {}", rajada);
         }
 
+        // Mantém a resposta original do wrapper
         return resposta;
     }
 
@@ -93,6 +130,33 @@ public class OrquestradorService {
             }
         } catch (Exception e) {
             throw new XmlValidationException("Falha ao interpretar XML de SAÍDA: " + e.getMessage(), e);
+        }
+    }
+
+    private XmlMapper unmarshalXmlEntrada(String xml) {
+        try {
+            JAXBContext ctx = JAXBContext.newInstance(XmlMapper.class);
+            Unmarshaller u = ctx.createUnmarshaller();
+            try (StringReader sr = new StringReader(xml)) {
+                return (XmlMapper) u.unmarshal(sr);
+            }
+        } catch (Exception e) {
+            throw new XmlValidationException("Falha ao interpretar XML de ENTRADA: " + e.getMessage(), e);
+        }
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.trim().isEmpty();
+    }
+
+    private static BigDecimal parseValorMonetario(String valor) {
+        if (isBlank(valor)) return null;
+        try {
+            // aceita "10,54" e "10.54"
+            String norm = valor.trim().replace(".", "").replace(",", ".");
+            return new BigDecimal(norm);
+        } catch (Exception e) {
+            return null;
         }
     }
 }

@@ -3,6 +3,7 @@ package br.gov.bnb.s489.commons.config.Bb;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -12,9 +13,10 @@ import org.springframework.web.client.RestTemplate;
 
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class BbPagamentoService {
 
-    private BbAuthService authService;
+    private final BbAuthService authService;
 
     @Value("${bb.api.client.pagamentoUrl}")
     private String pagamentoUrl;
