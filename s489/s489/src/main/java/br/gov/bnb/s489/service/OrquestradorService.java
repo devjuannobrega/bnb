@@ -6,6 +6,7 @@ import br.gov.bnb.s489.model.dto.ResponseDTO;
 import br.gov.bnb.s489.model.xml.XmlMapper;
 import br.gov.bnb.s489.model.xml.XmlMapperReceiver;
 import br.gov.bnb.s489.utils.exception.XmlValidationException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.xml.bind.JAXBContext;
 import jakarta.xml.bind.Unmarshaller;
 import jakarta.validation.ConstraintViolation;
@@ -33,17 +34,19 @@ public class OrquestradorService {
     private final ValidarXmlService validarXmlService; // valida ENTRADA
     private final Validator validator;                 // valida SAÍDA (se XmlMapperReceiver tiver anotações)
     private final BbPagamentoService bbPagamentoService;
+    private final ObjectMapper objectMapper;           // para serializar o ResponseDTO em JSON
 
     @Value("${bnb.wrapper.url}")
     private String wrapperUrl;
 
-    public ResponseDTO processar(ReceiverDTO request) {
+    /** Retorna SEMPRE JSON (String) para o controller */
+    public String processar(ReceiverDTO request) {
         log.info(">> OrquestradorService.processar iniciado para usuario={}", request.getUsuario());
 
         // 1) Valida XML de ENTRADA
         validarXmlService.validarXml(request.getXml());
 
-        // 2) Chama API externa (wrapper)
+        // 2) Chama API externa (wrapper) e obtém ResponseDTO
         ResponseDTO resposta = webClient.post()
                 .uri(wrapperUrl)
                 .bodyValue(request)
@@ -72,21 +75,22 @@ public class OrquestradorService {
             throw new XmlValidationException("XML de SAÍDA inválido: " + erros);
         }
 
-        // 5) Verificar RAJADA e acionar BB quando presente porém vazia
-        String rajada = null;
-        if (xmlReceiver.getObjectData() != null && xmlReceiver.getObjectData().getRecolhimento() != null) {
-            rajada = xmlReceiver.getObjectData().getRecolhimento().getRajada();
+        // 5) Verificar RAJADA
+        if (xmlReceiver.getObjectData() == null || xmlReceiver.getObjectData().getRecolhimento() == null) {
+            log.error("XML de saída sem ObjectData/Recolhimento. XML:\n{}", resposta.getXml());
+            throw new XmlValidationException("XML de SAÍDA inválido: Recolhimento ausente.");
         }
+        String rajada = xmlReceiver.getObjectData().getRecolhimento().getRajada();
 
         if (rajada == null) {
             log.info("Campo 'Rajada' AUSENTE no XML de saída.");
+            return toJson(resposta); // retorna JSON do wrapper
         } else if (rajada.trim().isEmpty()) {
             log.info("Campo 'Rajada' presente porém VAZIO no XML de saída. Acionando pagamento BB...");
 
-            // Extrai dados para pagamento
+            // --- Extrai dados para pagamento ---
             var rec = xmlReceiver.getObjectData().getRecolhimento();
 
-            // valor (BigDecimal, aceita vírgula)
             BigDecimal valorPagamento = parseValorMonetario(rec.getValor());
             if (valorPagamento == null) {
                 throw new XmlValidationException("Valor de pagamento inválido ou ausente no XML de saída.");
@@ -104,21 +108,24 @@ public class OrquestradorService {
             }
             String codigoBarrasCDV = xmlEntrada.getObjectData().getLinhaDigitavel();
 
-            // Chama Banco do Brasil
+            // --- Chama Banco do Brasil e RETORNA o JSON do BB ---
             String respBb = bbPagamentoService.enviarPagamento(
                     valorPagamento.doubleValue(),
                     codigoBarrasCDV,
                     codigoBarrassSDV
             );
 
+            if (respBb == null) {
+                throw new XmlValidationException("Falha ao chamar pagamento BB: resposta nula.");
+            }
+
             log.info("Retorno BB: {}", respBb);
+            return respBb; // <<<<<<<<<<<<<< retorna JSON do BB para o Postman
 
         } else {
             log.warn("⚠ Campo 'Rajada' encontrado no XML de saída: {}", rajada);
+            return toJson(resposta); // retorna JSON do wrapper
         }
-
-        // Mantém a resposta original do wrapper
-        return resposta;
     }
 
     private XmlMapperReceiver unmarshalXmlReceiver(String xml) {
@@ -152,11 +159,19 @@ public class OrquestradorService {
     private static BigDecimal parseValorMonetario(String valor) {
         if (isBlank(valor)) return null;
         try {
-            // aceita "10,54" e "10.54"
+            // aceita "10,54" e "10.54" (remove milhares)
             String norm = valor.trim().replace(".", "").replace(",", ".");
             return new BigDecimal(norm);
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    private String toJson(ResponseDTO dto) {
+        try {
+            return objectMapper.writeValueAsString(dto);
+        } catch (Exception e) {
+            throw new XmlValidationException("Falha ao serializar resposta do wrapper para JSON.", e);
         }
     }
 }

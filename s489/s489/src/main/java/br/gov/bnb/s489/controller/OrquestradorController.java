@@ -17,9 +17,10 @@ public class OrquestradorController {
     private final OrquestradorService orquestradorService;
 
     @PostMapping("/orquestrador")
-    public ResponseEntity<ResponseDTO> receber(@RequestBody ReceiverDTO request) {
+    public ResponseEntity<String> receber(@RequestBody ReceiverDTO request) {
         log.info(">> Controller: recebida requisição /orquestrador para usuario={}", request.getUsuario());
-        ResponseDTO resposta = orquestradorService.processar(request);
-        return ResponseEntity.ok(resposta);
+        String respostaJson = orquestradorService.processar(request);
+        return ResponseEntity.ok(respostaJson);
     }
 }
+
