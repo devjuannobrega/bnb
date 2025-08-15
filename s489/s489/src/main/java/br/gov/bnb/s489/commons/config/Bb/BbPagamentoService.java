@@ -4,20 +4,23 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 @Service
 @Slf4j
-@AllArgsConstructor
 public class BbPagamentoService {
 
-    private final BbAuthService authService;
+    private BbAuthService authService;
 
-    private static String PAGAMENTO_URL = "http://localhost:8085/api/pagamento";
+    @Value("${bb.api.client.pagamentoUrl}")
+    private String pagamentoUrl;
 
-    private static String GW_APP_KEY = "GwAppKey_8h2Pq4X7nM1rK9tV5yB6jL3dC0aF4sW";
+    @Value("${bb.api.client.gw-app-key}")
+    private String gwAppKey;
 
     public String enviarPagamento(double valorPagamento, String codigoBarrasCDV, String codigoBarrassSDV) {
         try {
@@ -31,14 +34,14 @@ public class BbPagamentoService {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("Authorization", "Bearer " + token);
-            headers.set("gw-app-key", GW_APP_KEY);
+            headers.set("gw-app-key", gwAppKey);
 
             PagamentoRequest pagamento = new PagamentoRequest(valorPagamento, codigoBarrasCDV, codigoBarrassSDV, "20");
 
             HttpEntity<PagamentoRequest> entity = new HttpEntity<>(pagamento, headers);
 
             ResponseEntity<String> response = restTemplate.exchange(
-                    PAGAMENTO_URL,
+                    pagamentoUrl,
                     HttpMethod.POST,
                     entity,
                     String.class

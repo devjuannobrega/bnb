@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: s489-orquestrador
+
+bb:
+  api:
+    client:
+      tokenUrl: http://localhost:8085/oauth/token
+      clientId: bbf3e2f9d7b64e45a2a13b5f2c6d1a09
+      secretId: YtR9xP3wL8nQ7vK6zT2mB1aC4eH5gF9hJ2kL0pO9qS8dW4xV3rT
+      pagamentoUrl: http://localhost:8085/api/pagamento
+      gw-app-key: GwAppKey_8h2Pq4X7nM1rK9tV5yB6jL3dC0aF4sW
+bnb:
+  wrapper:
+    url: http://localhost:8082/teste/wrapper
+
+

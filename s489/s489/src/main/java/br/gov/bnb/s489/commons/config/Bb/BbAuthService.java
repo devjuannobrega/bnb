@@ -15,13 +15,13 @@ import java.util.Map;
 @Slf4j
 public class BbAuthService {
 
-    @Value("${bb.token-url}")
+    @Value("${bb.api.client.tokenUrl}")
     private String tokenUrl;
 
-    @Value("${bb.client-id}")
+    @Value("${bb.api.client.clientId}")
     private String clientId;
 
-    @Value("${bb.secret-id}")
+    @Value("${bb.api.client.secretId}")
     private String secretId;
 
     public String obterToken() {
